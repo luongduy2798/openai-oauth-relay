@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "OpenAI OAuth Relay",
+  "version": "1.0.0",
+  "description": "Chuyển callback OAuth của Codex về dashboard đã được cấp quyền.",
+  "minimum_chrome_version": "102",
+  "permissions": ["storage", "scripting", "webNavigation"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "action": { "default_title": "OpenAI OAuth Relay" },
+  "background": { "service_worker": "background.js", "type": "module" }
+}

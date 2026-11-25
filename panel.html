@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OpenAI OAuth Relay</title>
+    <link rel="stylesheet" href="panel.css">
+    <script type="module" src="panel.js"></script>
+  </head>
+  <body>
+    <main>
+      <header class="page-header">
+        <div>
+          <h1>OpenAI OAuth Relay</h1>
+          <p>Chuyển callback Codex về dashboard đã bắt đầu đăng nhập.</p>
+        </div>
+        <label class="toggle">
+          <span id="enabled-label">Bật relay</span>
+          <input id="enabled" type="checkbox" role="switch" aria-labelledby="enabled-label" disabled>
+        </label>
+      </header>
+
+      <p id="error" class="error" role="alert" hidden></p>
+
+      <div class="grid">
+        <section class="card" aria-labelledby="flow-title">
+          <div class="section-header">
+            <h2 id="flow-title">Luồng OAuth</h2>
+            <span id="flow-status" class="status" role="status">Đang tải</span>
+          </div>
+          <ol class="flow">
+            <li id="start-step">
+              <h3>Bắt đầu đăng nhập</h3>
+              <p id="origin" class="endpoint">Chưa có phiên</p>
+              <p id="started-at" class="muted" hidden></p>
+            </li>
+            <li id="receive-step">
+              <h3>Nhận callback</h3>
+              <p id="source" class="endpoint"></p>
+              <p id="received-at" class="muted" hidden></p>
+              <ul id="fields" class="fields" aria-label="Tham số nhận được" hidden></ul>
+              <p id="callback-note" class="muted" hidden></p>
+            </li>
+            <li id="forward-step">
+              <h3>Chuyển về dashboard</h3>
+              <p id="destination" class="endpoint">Chờ dashboard khởi tạo đăng nhập</p>
+              <p id="forward-note" class="muted" hidden></p>
+            </li>
+          </ol>
+          <p id="pending" class="muted pending" hidden></p>
+        </section>
+
+        <section class="card" aria-labelledby="domains-title">
+          <h2 id="domains-title">Domain được phép</h2>
+          <form id="add-domain">
+            <label for="domain">Địa chỉ dashboard</label>
+            <div class="input-row">
+              <input id="domain" type="text" inputmode="url" spellcheck="false" autocomplete="off" placeholder="https://quota.chillix.me" required>
+              <button id="add" type="submit" disabled>Thêm</button>
+            </div>
+          </form>
+          <p id="domain-note" class="muted">Tải lại tab dashboard sau khi thêm domain hoặc bật relay.</p>
+          <ul id="domains" class="domains" aria-label="Domain đã cấu hình"></ul>
+          <p id="empty" class="empty">Chưa có domain.</p>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>
