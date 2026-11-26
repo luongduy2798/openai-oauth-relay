@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { callbackRule, hostPattern, matchCallback, parseOrigin } from "./relay.mjs";
+import { ambiguousCallbackRule, callbackRule, hostPattern, matchCallback, parseOrigin } from "./relay.mjs";
 
 const first = "a".repeat(43);
 const second = "b".repeat(43);
@@ -9,8 +9,10 @@ const pending = [
 ];
 const source = "http://127.0.0.1:1455/auth/callback";
 const query = `?code=example-code&state=${second}&example-extra=example-value`;
-const rule = callbackRule(pending[1], 1);
+const rule = callbackRule(pending[1], 2);
 const regex = new RegExp(rule.condition.regexFilter);
+const guard = ambiguousCallbackRule();
+const ambiguous = new RegExp(guard.condition.regexFilter);
 const redirected = (url) => url.replace(regex, rule.action.redirect.regexSubstitution.replace(/\\(\d)/g, "$$$1"));
 const target = redirected(source + query);
 const match = matchCallback(target, pending, 3);
@@ -21,11 +23,15 @@ assert.equal(hostPattern(pending[1].origin), "http://localhost/*");
 assert.equal(parseOrigin("https://*.example.com"), null);
 assert.equal(parseOrigin("http://quota.example"), null);
 assert.deepEqual(rule.condition.resourceTypes, ["main_frame"]);
+assert.ok(guard.priority > (rule.priority ?? 1));
+assert.equal(guard.action.type, "allow");
+assert.equal(ambiguous.test(source + query), false);
 assert.equal(target, `http://localhost:5173/api/oauth/codex/callback${query}#openai-oauth-relay-127.0.0.1`);
 assert.match(redirected(`http://localhost:1455/auth/callback?state=${second}&error=access_denied`), /#openai-oauth-relay-localhost$/);
 assert.equal(regex.test(`${source}?state=${first}&code=example-code`), false);
-assert.equal(regex.test(`${source}${query}&state=${first}`), false);
-assert.equal(regex.test(`${source}?st%61te=${first}&state=${second}`), false);
+assert.equal(ambiguous.test(`${source}${query}&state=${first}`), true);
+assert.equal(ambiguous.test(`${source}?st%61te=${first}&state=${second}`), true);
+assert.equal(ambiguous.test(`${source}?code=example%2Bcode&state=${second}`), false);
 assert.equal(regex.test(`${source}/other${query}`), false);
 assert.equal(regex.test(source.replace(":1455", ":1456") + query), false);
 assert.ok(match);

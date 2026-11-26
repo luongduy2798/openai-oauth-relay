@@ -3,12 +3,12 @@ export const LOOPBACK_CALLBACK = "http://localhost:1455/auth/callback";
 export const CALLBACK_PATH = "/api/oauth/codex/callback";
 const RELAY_MARKER = "#openai-oauth-relay-";
 const DISPLAY_FIELDS = ["code", "state", "scope", "error", "error_description", "error_uri"];
-const keyChar = "[^&=#?%]";
-// Match literal parameter names other than state without lookahead, which RE2 does not support.
-const differentStateKey = Array.from("state", (letter, index) =>
-  `${"state".slice(0, index)}[^${letter}&=#?%]${keyChar.repeat(4 - index)}`,
-).join("|");
-const otherParam = `(?:${keyChar}{1,4}|${keyChar}{6,}|${differentStateKey})(?:=[^&#]*)?`;
+const CALLBACK_QUERY = String.raw`^http://(localhost|127\.0\.0\.1):1455/auth/callback\?`;
+const CALLBACK_REQUEST = {
+  isUrlFilterCaseSensitive: true,
+  resourceTypes: ["main_frame"],
+  requestMethods: ["get"],
+};
 
 export function parseOrigin(input) {
   const value = input.trim();
@@ -51,10 +51,21 @@ export function callbackRule(login, id) {
       redirect: { regexSubstitution: `${destinationFor(login.origin)}?\\2${RELAY_MARKER}\\1` },
     },
     condition: {
-      regexFilter: `^http://(localhost|127\\.0\\.0\\.1):1455/auth/callback\\?((?:${otherParam}&)*state=${login.state}(?:&${otherParam})*)(?:#.*)?$`,
-      isUrlFilterCaseSensitive: true,
-      resourceTypes: ["main_frame"],
-      requestMethods: ["get"],
+      ...CALLBACK_REQUEST,
+      regexFilter: `${CALLBACK_QUERY}((?:[^#]*&)?state=${login.state}(?:&[^#]*)?)(?:#.*)?$`,
+    },
+  };
+}
+
+export function ambiguousCallbackRule() {
+  // Keep the redirect regex under Chrome's RE2 limit. Let ambiguous queries reach the loopback unchanged.
+  return {
+    id: 1,
+    priority: 2,
+    action: { type: "allow" },
+    condition: {
+      ...CALLBACK_REQUEST,
+      regexFilter: `${CALLBACK_QUERY}(?:[^#]*&)?(?:state(?:=[^&#]*)?&(?:[^#]*&)?state(?:[=&#]|$)|[^=&#?]*%[^=&#?]*(?:[=&?#]|$))`,
     },
   };
 }

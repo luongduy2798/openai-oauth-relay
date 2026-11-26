@@ -1,4 +1,4 @@
-import { CALLBACK_PATH, DEFAULT_SETTINGS, callbackRule, destinationFor, hostPattern, matchCallback, parseOrigin, validState } from "./relay.mjs";
+import { CALLBACK_PATH, DEFAULT_SETTINGS, ambiguousCallbackRule, callbackRule, destinationFor, hostPattern, matchCallback, parseOrigin, validState } from "./relay.mjs";
 
 const BRIDGE_ID = "dashboard-bridge";
 const LOGIN_TTL = 10 * 60 * 1000;
@@ -25,7 +25,8 @@ async function saveRelay(relay) {
   const rules = await chrome.declarativeNetRequest.getSessionRules();
   const now = Date.now();
   relay.pending = relay.pending.filter((login) => login.expiresAt > now);
-  const addRules = relay.pending.map((login, index) => callbackRule(login, index + 1));
+  const addRules = relay.pending.map((login, index) => callbackRule(login, index + 2));
+  if (addRules.length) addRules.unshift(ambiguousCallbackRule());
   await chrome.declarativeNetRequest.updateSessionRules({
     removeRuleIds: rules.map(({ id }) => id),
     addRules,
