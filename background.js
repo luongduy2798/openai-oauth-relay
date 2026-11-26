@@ -1,8 +1,10 @@
-import { CALLBACK_FILTER, DEFAULT_SETTINGS, destinationFor, hostPattern, matchCallback, parseOrigin, validState } from "./relay.mjs";
+import { CALLBACK_PATH, DEFAULT_SETTINGS, callbackRule, destinationFor, hostPattern, matchCallback, parseOrigin, validState } from "./relay.mjs";
 
 const BRIDGE_ID = "dashboard-bridge";
 const LOGIN_TTL = 10 * 60 * 1000;
+const EXPIRY_ALARM = "expire-pending-logins";
 const PANEL_URL = chrome.runtime.getURL("panel.html");
+const LOOPBACK_HOSTS = ["http://localhost/*", "http://127.0.0.1/*"];
 let queue = Promise.resolve();
 
 function serialize(work) {
@@ -17,6 +19,32 @@ async function readSettings() {
 
 async function readRelay() {
   return (await chrome.storage.session.get("relay")).relay ?? { pending: [], recent: null };
+}
+
+async function saveRelay(relay) {
+  const rules = await chrome.declarativeNetRequest.getSessionRules();
+  const now = Date.now();
+  relay.pending = relay.pending.filter((login) => login.expiresAt > now);
+  const addRules = relay.pending.map((login, index) => callbackRule(login, index + 1));
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: rules.map(({ id }) => id),
+    addRules,
+  });
+  try {
+    await chrome.storage.session.set({ relay });
+  } catch (error) {
+    await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: addRules.map(({ id }) => id),
+      addRules: rules,
+    });
+    throw error;
+  }
+
+  if (relay.pending.length) {
+    await chrome.alarms.create(EXPIRY_ALARM, { when: Math.min(...relay.pending.map((login) => login.expiresAt)) });
+  } else {
+    await chrome.alarms.clear(EXPIRY_ALARM);
+  }
 }
 
 function hasHost(origin) {
@@ -38,8 +66,8 @@ async function syncAccess({ enabled, origins }) {
   }
 
   const relay = await readRelay();
-  const pending = relay.pending.filter((login) => activeOrigins.includes(login.origin));
-  if (pending.length !== relay.pending.length) await chrome.storage.session.set({ relay: { ...relay, pending } });
+  relay.pending = relay.pending.filter((login) => activeOrigins.includes(login.origin));
+  await saveRelay(relay);
 }
 
 async function saveSettings(settings) {
@@ -72,7 +100,7 @@ async function manage(message) {
     const origins = settings.origins.filter((value) => value !== origin);
     await saveSettings({ ...settings, origins });
     const pattern = hostPattern(origin);
-    if (!origins.some((value) => hostPattern(value) === pattern)) {
+    if (new URL(origin).protocol === "https:" && !origins.some((value) => hostPattern(value) === pattern)) {
       await chrome.permissions.remove({ origins: [pattern] });
     }
   } else {
@@ -87,7 +115,9 @@ async function dashboardMessage(message, sender) {
   }
   const origin = new URL(sender.url).origin;
   const { enabled, origins } = await readSettings();
-  if (!enabled || !origins.includes(origin) || !(await hasHost(origin))) {
+  if (!enabled || !origins.includes(origin) || !(await chrome.permissions.contains({
+    origins: [hostPattern(origin), ...LOOPBACK_HOSTS],
+  }))) {
     return { ok: false, error: "relay_unavailable" };
   }
   if (message.type === "extension-ping") return { ok: true };
@@ -115,7 +145,7 @@ async function dashboardMessage(message, sender) {
       expiresAt: now + LOGIN_TTL,
     });
   }
-  await chrome.storage.session.set({ relay });
+  await saveRelay(relay);
   return { ok: true };
 }
 
@@ -128,34 +158,30 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   return true;
 });
 
-async function forward(details) {
-  const settings = await readSettings();
-  if (!settings.enabled) return;
-
+async function recordCallback(details) {
   const relay = await readRelay();
   const match = matchCallback(details.url, relay.pending);
-  if (!match || !settings.origins.includes(match.login.origin) || !(await hasHost(match.login.origin))) return;
-
-  // Check the initiating tab only on a matched callback, without listening to every tab closure.
-  const owner = await chrome.tabs.get(match.login.tabId).catch(() => null);
-  if (!owner?.url || new URL(owner.url).origin !== match.login.origin) return;
-
+  if (!match) return;
   relay.pending = relay.pending.filter((login) => login !== match.login);
   relay.recent = match.activity;
-  await chrome.storage.session.set({ relay });
-
-  try {
-    await chrome.tabs.update(details.tabId, { url: match.target });
-    relay.recent.status = "forwarded";
-  } catch {
-    relay.recent.status = "failed";
-  }
-  await chrome.storage.session.set({ relay });
+  await saveRelay(relay);
 }
 
-chrome.webNavigation.onBeforeNavigate.addListener((details) => {
-  if (details.frameId === 0) serialize(() => forward(details)).catch(() => console.error("OAuth relay failed"));
-}, { url: [CALLBACK_FILTER] });
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId === 0) serialize(() => recordCallback(details)).catch(() => console.error("OAuth relay activity update failed"));
+}, { url: [{ pathEquals: CALLBACK_PATH }] });
+
+chrome.alarms.onAlarm.addListener(({ name }) => {
+  if (name === EXPIRY_ALARM) serialize(async () => saveRelay(await readRelay())).catch(() => console.error("OAuth relay expiry failed"));
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  serialize(async () => {
+    const relay = await readRelay();
+    const pending = relay.pending.filter((login) => login.tabId !== tabId);
+    if (pending.length !== relay.pending.length) await saveRelay({ ...relay, pending });
+  }).catch(() => console.error("OAuth relay cleanup failed"));
+});
 
 function restoreBridge() {
   serialize(async () => syncAccess(await readSettings())).catch(() => console.error("OAuth bridge setup failed"));

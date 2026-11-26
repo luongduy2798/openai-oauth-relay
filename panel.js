@@ -11,7 +11,7 @@ const statusLabels = {
   waiting: "Đang chờ callback",
   expired: "Phiên đã hết hạn",
   received: "Đã nhận callback",
-  forwarded: "Đã gửi chuyển hướng",
+  forwarded: "Đã chuyển tiếp callback",
   failed: "Chuyển hướng lỗi",
 };
 const errors = {
@@ -157,7 +157,8 @@ byId("add-domain").addEventListener("submit", (event) => {
   }
   change(async () => {
     // The permission request has to run directly from the form submit gesture.
-    const granted = await chrome.permissions.request({ origins: [hostPattern(origin)] });
+    const granted = new URL(origin).protocol === "http:" ||
+      await chrome.permissions.request({ origins: [hostPattern(origin)] });
     if (!granted) throw new Error(errors.permission_required);
     await send({ type: "add-domain", origin });
     domain.value = "";

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { hostPattern, matchCallback, parseOrigin } from "./relay.mjs";
+import { callbackRule, hostPattern, matchCallback, parseOrigin } from "./relay.mjs";
 
 const first = "a".repeat(43);
 const second = "b".repeat(43);
@@ -9,19 +9,30 @@ const pending = [
 ];
 const source = "http://127.0.0.1:1455/auth/callback";
 const query = `?code=example-code&state=${second}&example-extra=example-value`;
-const match = matchCallback(source + query, pending, 3);
+const rule = callbackRule(pending[1], 1);
+const regex = new RegExp(rule.condition.regexFilter);
+const redirected = (url) => url.replace(regex, rule.action.redirect.regexSubstitution.replace(/\\(\d)/g, "$$$1"));
+const target = redirected(source + query);
+const match = matchCallback(target, pending, 3);
 
 assert.equal(parseOrigin("quota.example"), pending[0].origin);
 assert.equal(parseOrigin("localhost:5173"), pending[1].origin);
 assert.equal(hostPattern(pending[1].origin), "http://localhost/*");
 assert.equal(parseOrigin("https://*.example.com"), null);
 assert.equal(parseOrigin("http://quota.example"), null);
+assert.deepEqual(rule.condition.resourceTypes, ["main_frame"]);
+assert.equal(target, `http://localhost:5173/api/oauth/codex/callback${query}#openai-oauth-relay-127.0.0.1`);
+assert.match(redirected(`http://localhost:1455/auth/callback?state=${second}&error=access_denied`), /#openai-oauth-relay-localhost$/);
+assert.equal(regex.test(`${source}?state=${first}&code=example-code`), false);
+assert.equal(regex.test(`${source}${query}&state=${first}`), false);
+assert.equal(regex.test(`${source}?st%61te=${first}&state=${second}`), false);
+assert.equal(regex.test(`${source}/other${query}`), false);
+assert.equal(regex.test(source.replace(":1455", ":1456") + query), false);
 assert.ok(match);
-assert.equal(match.target, `http://localhost:5173/api/oauth/codex/callback${query}`);
+assert.equal(match.activity.source, source);
+assert.equal(match.activity.destination, "http://localhost:5173/api/oauth/codex/callback");
 assert.deepEqual(match.activity.fields, ["code", "state"]);
 assert.equal(match.activity.otherFields, 1);
 assert.doesNotMatch(JSON.stringify(match.activity), /example-code|example-extra|example-value|bbbb/);
-assert.equal(matchCallback(source + query, pending, 10), null);
-assert.equal(matchCallback(`${source}${query}&state=${first}`, pending, 3), null);
-assert.equal(matchCallback(`${source}/other${query}`, pending, 3), null);
-assert.equal(matchCallback(source.replace(":1455", ":1456") + query, pending, 3), null);
+assert.equal(matchCallback(target, pending, 10), null);
+assert.equal(matchCallback(target.replace("localhost:5173", "localhost:5174"), pending, 3), null);
